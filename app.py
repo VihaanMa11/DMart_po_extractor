@@ -96,6 +96,12 @@ def init_data_files():
                 'role': 'admin',
                 'name': 'Arpit',
                 'created': datetime.now().isoformat()
+            },
+            'vihaan@1106': {
+                'password': hashlib.sha256('vihaan@1106'.encode()).hexdigest(),
+                'role': 'admin',
+                'name': 'Vihaan',
+                'created': datetime.now().isoformat()
             }
         }
         save_json(USERS_FILE, default_users)
