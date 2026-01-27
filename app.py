@@ -77,34 +77,49 @@ SESSIONS_FILE = os.path.join(TEMP_DATA, 'sessions.json')
 
 # Initialize data files
 def init_data_files():
-    if not os.path.exists(USERS_FILE):
-        default_users = {
-            'admin': {
-                'password': hashlib.sha256('admin123'.encode()).hexdigest(),
-                'role': 'admin',
-                'name': 'Administrator',
-                'created': datetime.now().isoformat()
-            },
-            'user': {
-                'password': hashlib.sha256('user123'.encode()).hexdigest(),
-                'role': 'user',
-                'name': 'Demo User',
-                'created': datetime.now().isoformat()
-            },
-            'arpit': {
-                'password': hashlib.sha256('Shareat@2026'.encode()).hexdigest(),
-                'role': 'admin',
-                'name': 'Arpit',
-                'created': datetime.now().isoformat()
-            },
-            'vihaan@1106': {
-                'password': hashlib.sha256('vihaan@1106'.encode()).hexdigest(),
-                'role': 'admin',
-                'name': 'Vihaan',
-                'created': datetime.now().isoformat()
-            }
+    # Define default/hardcoded users
+    default_users = {
+        'admin': {
+            'password': hashlib.sha256('admin123'.encode()).hexdigest(),
+            'role': 'admin',
+            'name': 'Administrator',
+            'created': datetime.now().isoformat()
+        },
+        'user': {
+            'password': hashlib.sha256('user123'.encode()).hexdigest(),
+            'role': 'user',
+            'name': 'Demo User',
+            'created': datetime.now().isoformat()
+        },
+        'arpit': {
+            'password': hashlib.sha256('Shareat@2026'.encode()).hexdigest(),
+            'role': 'admin',
+            'name': 'Arpit',
+            'created': datetime.now().isoformat()
+        },
+        'vihaan@1106': {
+            'password': hashlib.sha256('vihaan@1106'.encode()).hexdigest(),
+            'role': 'admin',
+            'name': 'Vihaan',
+            'created': datetime.now().isoformat()
         }
+    }
+
+    if not os.path.exists(USERS_FILE):
         save_json(USERS_FILE, default_users)
+    else:
+        # Ensure default users exist in current file
+        current_users = load_json(USERS_FILE)
+        changed = False
+        for username, user_data in default_users.items():
+            if username not in current_users:
+                current_users[username] = user_data
+                changed = True
+            # Optional: enforcing password/role updates?
+            # For now let's just ensure they exist.
+        
+        if changed:
+            save_json(USERS_FILE, current_users)
     
     if not os.path.exists(ACTIVITY_FILE):
         save_json(ACTIVITY_FILE, [])
