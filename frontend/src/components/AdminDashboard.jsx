@@ -249,6 +249,7 @@ function AdminDashboard({ token, onBack }) {
                   <th>Status</th>
                   <th>Last Login</th>
                   <th>Total Uploads</th>
+                  <th>Files in Session</th>
                 </tr>
               </thead>
               <tbody>
@@ -273,6 +274,21 @@ function AdminDashboard({ token, onBack }) {
                       </span>
                     </td>
                     <td>{user.total_uploads}</td>
+                    <td>
+                      {/* Calculate files processed in the most recent session/login window */}
+                      {user.is_online ? (
+                        <span className="session-files">
+                          {activities
+                            .filter(a =>
+                              a.username === user.username &&
+                              a.action === 'upload' &&
+                              new Date(a.timestamp) > new Date(user.last_login || 0)
+                            )
+                            .reduce((acc, curr) => acc + (curr.details?.file_count || 0), 0)
+                          } files
+                        </span>
+                      ) : '-'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
