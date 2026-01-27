@@ -64,7 +64,13 @@ else:
     os.makedirs(DATA_FOLDER, exist_ok=True)
 
 # File paths
-USERS_FILE = os.path.join(DATA_FOLDER, 'users.json')
+# Users file needs to be writable if it doesn't exist (creation of defaults)
+# On Vercel, since we don't commit users.json, we must generate it in /tmp
+if IS_VERCEL:
+    USERS_FILE = os.path.join(TEMP_DATA, 'users.json')
+else:
+    USERS_FILE = os.path.join(DATA_FOLDER, 'users.json')
+
 # Activity and Sessions should be in writable location
 ACTIVITY_FILE = os.path.join(TEMP_DATA, 'activity.json')
 SESSIONS_FILE = os.path.join(TEMP_DATA, 'sessions.json')
