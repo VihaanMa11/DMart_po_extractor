@@ -14,10 +14,7 @@ uploads/
 outputs/
 data/sessions.json
 data/activity.json
-# Keep users.json but maybe we should exclude it if it has sensitive data? 
-# The user just asked to add a user, so they probably want to keep it for now.
-# But generally checking in credentials is bad. I'll warn them.
-# For now I will include it as it's a local app request.
+data/users.json
 
 # IDE
 .vscode/
