@@ -63,9 +63,9 @@ function AdminDashboard({ token, onBack }) {
       const headers = { 'X-User-Token': token }
 
       const [statsRes, usersRes, activityRes] = await Promise.all([
-        fetch('http://localhost:5000/api/admin/stats', { headers }),
-        fetch('http://localhost:5000/api/admin/users', { headers }),
-        fetch('http://localhost:5000/api/admin/activity?limit=100', { headers })
+        fetch('/api/admin/stats', { headers }),
+        fetch('/api/admin/users', { headers }),
+        fetch('/api/admin/activity?limit=100', { headers })
       ])
 
       const statsData = await statsRes.json()
@@ -140,19 +140,19 @@ function AdminDashboard({ token, onBack }) {
       </div>
 
       <div className="admin-tabs">
-        <button 
+        <button
           className={`tab ${activeTab === 'overview' ? 'active' : ''}`}
           onClick={() => setActiveTab('overview')}
         >
           Overview
         </button>
-        <button 
+        <button
           className={`tab ${activeTab === 'users' ? 'active' : ''}`}
           onClick={() => setActiveTab('users')}
         >
           Users
         </button>
-        <button 
+        <button
           className={`tab ${activeTab === 'activity' ? 'active' : ''}`}
           onClick={() => setActiveTab('activity')}
         >
@@ -286,7 +286,7 @@ function AdminDashboard({ token, onBack }) {
           <div className="activity-list">
             {activities.map(activity => (
               <div key={activity.id} className="activity-item">
-                <div 
+                <div
                   className="activity-indicator"
                   style={{ backgroundColor: getActionColor(activity.action) }}
                 />
