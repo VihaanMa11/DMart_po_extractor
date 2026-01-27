@@ -31,9 +31,23 @@ def after_request(response):
     return response
 
 # Configuration
-UPLOAD_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'uploads')
-OUTPUT_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'outputs')
-DATA_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data')
+# Configuration
+IS_VERCEL = os.environ.get('VERCEL') == '1'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+
+if IS_VERCEL:
+    # On Vercel, we can only write to /tmp
+    UPLOAD_FOLDER = os.path.join('/tmp', 'uploads')
+    OUTPUT_FOLDER = os.path.join('/tmp', 'outputs')
+    # Data folder must be split: read from source, write to tmp
+    DATA_FOLDER = os.path.join(BASE_DIR, 'data') # Read source
+    TEMP_DATA = os.path.join('/tmp', 'data')     # Write temp
+else:
+    UPLOAD_FOLDER = os.path.join(BASE_DIR, 'uploads')
+    OUTPUT_FOLDER = os.path.join(BASE_DIR, 'outputs')
+    DATA_FOLDER = os.path.join(BASE_DIR, 'data')
+    TEMP_DATA = DATA_FOLDER
+
 ALLOWED_EXTENSIONS = {'pdf'}
 MAX_CONTENT_LENGTH = 50 * 1024 * 1024
 
@@ -41,15 +55,19 @@ app.config['UPLOAD_FOLDER'] = UPLOAD_FOLDER
 app.config['OUTPUT_FOLDER'] = OUTPUT_FOLDER
 app.config['MAX_CONTENT_LENGTH'] = MAX_CONTENT_LENGTH
 
-# Ensure directories exist
+# Ensure writable directories exist
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 os.makedirs(OUTPUT_FOLDER, exist_ok=True)
-os.makedirs(DATA_FOLDER, exist_ok=True)
+if IS_VERCEL:
+    os.makedirs(TEMP_DATA, exist_ok=True)
+else:
+    os.makedirs(DATA_FOLDER, exist_ok=True)
 
-# File paths for persistent storage
+# File paths
 USERS_FILE = os.path.join(DATA_FOLDER, 'users.json')
-ACTIVITY_FILE = os.path.join(DATA_FOLDER, 'activity.json')
-SESSIONS_FILE = os.path.join(DATA_FOLDER, 'sessions.json')
+# Activity and Sessions should be in writable location
+ACTIVITY_FILE = os.path.join(TEMP_DATA, 'activity.json')
+SESSIONS_FILE = os.path.join(TEMP_DATA, 'sessions.json')
 
 # Initialize data files
 def init_data_files():
