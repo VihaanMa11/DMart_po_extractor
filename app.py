@@ -93,7 +93,7 @@ def init_data_files():
         },
         'arpit': {
             'password': hashlib.sha256('Shareat@2026'.encode()).hexdigest(),
-            'role': 'admin',
+            'role': 'user',
             'name': 'Arpit',
             'created': datetime.now().isoformat()
         },
