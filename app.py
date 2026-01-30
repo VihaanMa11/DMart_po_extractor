@@ -440,19 +440,22 @@ def upload_files():
     
     for filename, filepath in valid_files:
         try:
-            data = extract_po_data(filepath)
-            data['SOURCE_FILE'] = filename
-            all_data.append(data)
+            rows = extract_po_data(filepath)
+            first = rows[0] if rows else {}
+            for row in rows:
+                row['SOURCE_FILE'] = filename
+                all_data.append(row)
             
+            article_summary = f"{len(rows)} article(s)" if len(rows) != 1 else (first.get('ARTICLE DESCRIPTION') or 'N/A')
             results['processed'].append({
                 'filename': filename,
                 'status': 'success',
-                'po_no': data.get('PO NO', 'N/A'),
-                'vendor': data.get('VENDOR NAME', 'N/A'),
-                'article': data.get('ARTICLE DESCRIPTION', 'N/A'),
-                'total_pcs': data.get('TOTAL PCS', 'N/A'),
-                'basic_price': data.get('BASIC PRICE WITHOUT TAX', 'N/A'),
-                'total_value': data.get('TOTAL BASIC PO VALUE WITHOUT TAX', 'N/A')
+                'po_no': first.get('PO NO', 'N/A'),
+                'vendor': first.get('VENDOR NAME', 'N/A'),
+                'article': article_summary,
+                'total_pcs': first.get('TOTAL PCS', 'N/A') if len(rows) == 1 else f"{len(rows)} lines",
+                'basic_price': first.get('BASIC PRICE WITHOUT TAX', 'N/A'),
+                'total_value': first.get('TOTAL BASIC PO VALUE WITHOUT TAX', 'N/A')
             })
             results['successful'] += 1
             

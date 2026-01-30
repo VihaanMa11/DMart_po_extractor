@@ -30,31 +30,57 @@ STATE_CODES = {
 }
 
 
+def _format_date_mm_dd_yyyy(date_str):
+    """Parse date string (dd/mm/yyyy or dd-mm-yyyy) and return mm/dd/yyyy."""
+    if not date_str:
+        return ''
+    normalized = date_str.replace('.', '/').replace('-', '/')
+    parts = normalized.split('/')
+    if len(parts) != 3:
+        return date_str
+    try:
+        # Indian PO format is typically dd/mm/yyyy
+        day, month, year = int(parts[0]), int(parts[1]), int(parts[2])
+        d = datetime(year, month, day)
+        return d.strftime('%m/%d/%Y')
+    except (ValueError, TypeError):
+        return date_str
+
+
 def extract_po_data(pdf_path):
-    """Extract purchase order data from a PDF file."""
-    data = {
-        'CHAINS': '',
-        'SITE CODE': '',
-        'STATE': '',
-        'VENDOR CODE': '',
-        'VENDOR NAME': '',
-        'Sales Person': '',
-        'PO NO': '',
-        'PO DATE': '',
-        'DELIVERY DATE': '',
-        'ARTICLE DESCRIPTION': '',
-        'TOTAL PCS': '',
-        'BASIC PRICE WITHOUT TAX': '',
-        'TOTAL BASIC PO VALUE WITHOUT TAX': '',
-        'REMARKS': '',
-        'GRN AMOUNT': '',
-        'Price/pcs': '',
-        'Actual Billing Price': '',
-        'Billing price of Reliance': '',
-        'Price Difference': '',
-        'Remarks By SO': ''
-    }
-    
+    """Extract purchase order data from a PDF file. Returns a list of rows (one per article line)."""
+    def empty_row():
+        return {
+            'CHAINS': '', 'SITE CODE': '', 'STATE': '', 'VENDOR CODE': '', 'VENDOR NAME': '',
+            'Sales Person': '', 'PO NO': '', 'PO DATE': '', 'DELIVERY DATE': '',
+            'ARTICLE DESCRIPTION': '', 'TOTAL PCS': '', 'BASIC PRICE WITHOUT TAX': '',
+            'TOTAL BASIC PO VALUE WITHOUT TAX': '', 'REMARKS': '', 'GRN AMOUNT': '',
+            'Price/pcs': '', 'Actual Billing Price': '', 'Billing price of Reliance': '',
+            'Price Difference': '', 'Remarks By SO': ''
+        }
+
+    # Article description: capture full text including weight in brackets e.g. SHAREAT FOOCHKA PANI PURI(1KG)
+    # Lookahead (?=...\s+\d) ensures we only end at UOM when followed by quantity (not "KG" inside "(1KG)")
+    article_regex = re.compile(
+        r'(\d{13})\s+'  # EAN (13 digits)
+        r'([\w\s\(\)\-/]+?)\s*'  # Article description (incl. weight like (1KG))
+        r'(?=(?:EA|PC|KG|LT|MT)\s+\d)'  # End only when UOM is followed by quantity
+        r'(?:EA|PC|KG|LT|MT)\s+'  # Unit of measure
+        r'(\d+)\s+'  # Quantity
+        r'\d+\s+'  # Free
+        r'[\d.]+\s+'  # Basic Price (B.Price)
+        r'[\d.]+\s+'  # Special Discount
+        r'[\d.]+\s+'  # Schedule Value
+        r'[\d.]+\s+'  # SGST
+        r'[\d.]+\s+'  # CGST
+        r'[\d.]+\s+'  # Cess
+        r'([\d.]+)\s+'  # Landing Price (L.Price)
+        r'[\d.]+\s+'  # MRP
+        r'([\d,]+\.?\d*)',  # Total Value
+        re.MULTILINE
+    )
+
+    rows = []
     try:
         with pdfplumber.open(pdf_path) as pdf:
             full_text = ''
@@ -63,56 +89,40 @@ def extract_po_data(pdf_path):
                 if text:
                     full_text += text + '\n'
             
+            data = empty_row()
+            
             # Extract Chain Name (Company name after "Ship To")
             chain_match = re.search(r'Ship To\s+([\w\s]+Ltd\.?)', full_text)
             if chain_match:
                 data['CHAINS'] = chain_match.group(1).strip()
             
             # Extract Site Code / Address (location details)
-            # Parse the full address from the PDF text
-            # The address is typically between "Ship To" company name and "CIN:"
             site_code = ''
-            
-            # Extract the full address block
             block_match = re.search(r'Ship To\s+(.*?)CIN:', full_text, re.DOTALL)
             if block_match:
                 block = block_match.group(1)
-                # Remove the company name (already captured in CHAINS)
                 block = re.sub(r'Avenue Supermarts Ltd\.?', '', block)
-                # Remove PO info
                 block = re.sub(r'PO\s*#\s*\d+', '', block)
                 block = re.sub(r'PO\s*Date\s*[\d.]+', '', block)
                 block = re.sub(r'Delivery\s*Dt?\s*[\d.]+', '', block)
-                # Clean up whitespace
                 block = re.sub(r'\n', ' ', block)
                 block = re.sub(r'\s+', ' ', block).strip()
-                
-                # Extract components
                 parts = []
-                # DMart location name
                 dmart_match = re.search(r'([A-Za-z\s]+(?:DMart|Dmart|DMART))', block)
                 if dmart_match:
                     parts.append(dmart_match.group(1).strip())
                     block = block.replace(dmart_match.group(1), '')
-                
-                # Extract remaining address parts
-                # Look for patterns like "Bahadurguda, Saroor Nagar" and "LB Nagar, Ranga Reddy"
                 addr_parts = re.findall(r'([A-Za-z][A-Za-z\s,]+?)(?=\s+[A-Z][a-z]+\s+\d{6}|\s*$)', block)
                 for part in addr_parts:
                     cleaned = part.strip(' ,')
                     if cleaned and cleaned not in parts:
                         parts.append(cleaned)
-                
-                # Extract city and pincode
                 city_pin = re.search(r'([A-Z][a-z]+)\s+(\d{6})', block)
                 if city_pin:
                     parts.append(f"{city_pin.group(1)} - {city_pin.group(2)}")
-                
                 site_code = ', '.join(parts)
-                # Clean up any double commas or spaces
                 site_code = re.sub(r',\s*,', ',', site_code)
                 site_code = re.sub(r'\s+', ' ', site_code).strip(' ,')
-            
             data['SITE CODE'] = site_code
             
             # Extract PO Number
@@ -120,24 +130,21 @@ def extract_po_data(pdf_path):
             if po_match:
                 data['PO NO'] = po_match.group(1)
             
-            # Extract PO Date
+            # Extract PO Date (output format mm/dd/yyyy)
             po_date_match = re.search(r'PO\s*Date\s*(\d{2}[./]\d{2}[./]\d{4})', full_text)
             if po_date_match:
-                date_str = po_date_match.group(1).replace('.', '-').replace('/', '-')
-                data['PO DATE'] = date_str
+                data['PO DATE'] = _format_date_mm_dd_yyyy(po_date_match.group(1))
             
-            # Extract Delivery Date
+            # Extract Delivery Date (output format mm/dd/yyyy)
             delivery_match = re.search(r'Delivery\s*Dt?\s*(\d{2}[./]\d{2}[./]\d{4})', full_text)
             if delivery_match:
-                date_str = delivery_match.group(1).replace('.', '-').replace('/', '-')
-                data['DELIVERY DATE'] = date_str
+                data['DELIVERY DATE'] = _format_date_mm_dd_yyyy(delivery_match.group(1))
             
             # Extract Vendor Name
             vendor_match = re.search(r'Vendor\s+([\w\s]+?)(?=\s+GSTIN|\s+Phone|\s+FSSAI|Email)', full_text)
             if vendor_match:
                 data['VENDOR NAME'] = vendor_match.group(1).strip()
             else:
-                # Alternative pattern
                 vendor_match2 = re.search(r'Phone\s+Vendor\s+([\w\s]+?)(?=\s+GSTIN|Email|\n)', full_text)
                 if vendor_match2:
                     data['VENDOR NAME'] = vendor_match2.group(1).strip()
@@ -148,75 +155,65 @@ def extract_po_data(pdf_path):
                 state_code = gstin_match.group(1)[:2]
                 data['STATE'] = STATE_CODES.get(state_code, '')
             
-            # Extract Vendor GSTIN/Code (vendor's GSTIN can serve as vendor code)
-            vendor_gstin_match = re.search(r'GSTIN\s+(\d{2}[A-Z0-9]+)(?=\s*Sno|\s*$)', full_text, re.MULTILINE)
-            if vendor_gstin_match:
-                data['VENDOR CODE'] = vendor_gstin_match.group(1)
+            # Vendor code: do not use GST number. Look for explicit "Vendor Code" in PDF if present.
+            vendor_code_match = re.search(r'Vendor\s*Code\s*[:\s]*([A-Za-z0-9\-]+)', full_text, re.IGNORECASE)
+            if vendor_code_match:
+                data['VENDOR CODE'] = vendor_code_match.group(1).strip()
             
-            # Extract Article/Product Details
-            # Pattern to match article line with EAN, description, and values
-            # Looking for: EAN, Description, UOM, Qty, Free, B.Price, Sp.Dis, Sch.Val, SGST, CGST, Cess, L.Price, MRP, T.Value
-            article_pattern = re.search(
-                r'(\d{13})\s+'  # EAN (13 digits)
-                r'([\w\s\(\)]+?)\s+'  # Article description
-                r'(?:EA|PC|KG|LT|MT)\s+'  # Unit of measure
-                r'(\d+)\s+'  # Quantity
-                r'\d+\s+'  # Free
-                r'[\d.]+\s+'  # Basic Price (B.Price)
-                r'[\d.]+\s+'  # Special Discount
-                r'[\d.]+\s+'  # Schedule Value
-                r'[\d.]+\s+'  # SGST
-                r'[\d.]+\s+'  # CGST
-                r'[\d.]+\s+'  # Cess
-                r'([\d.]+)\s+'  # Landing Price (L.Price) - This is what we want for BASIC PRICE WITHOUT TAX
-                r'[\d.]+\s+'  # MRP
-                r'([\d,]+\.?\d*)',  # Total Value
-                full_text
+            # Weight continuation on next line e.g. "PURI(1KG)" or "PANIPURI(200G)" after "SHAREAT FOOCHKA PANI"
+            weight_continuation_re = re.compile(
+                r'\n\s*([A-Za-z]*\s*\(\d+(?:\.\d+)?\s*(?:KG|G|ML|LT)\))\s*\[?',
+                re.IGNORECASE
             )
-            
-            if article_pattern:
-                data['ARTICLE DESCRIPTION'] = article_pattern.group(2).strip()
-                data['TOTAL PCS'] = article_pattern.group(3)
-                data['BASIC PRICE WITHOUT TAX'] = article_pattern.group(4)  # L.Price
-                total_value = article_pattern.group(5).replace(',', '')
-                data['TOTAL BASIC PO VALUE WITHOUT TAX'] = total_value
+            # Extract ALL article line items (multiple articles per PO)
+            article_matches = list(article_regex.finditer(full_text))
+            if article_matches:
+                for m in article_matches:
+                    row = data.copy()
+                    desc = m.group(2).strip()
+                    # Append weight-in-brackets from next line if present (e.g. "PURI(1KG)" or "PANIPURI(200G)")
+                    after_match = full_text[m.end():m.end() + 120]
+                    cont = weight_continuation_re.search(after_match)
+                    if cont:
+                        desc = desc + ' ' + cont.group(1).strip()
+                    
+                    if 'shareat' not in desc.lower():
+                        continue
+
+                    row['ARTICLE DESCRIPTION'] = desc
+                    row['TOTAL PCS'] = m.group(3)
+                    row['BASIC PRICE WITHOUT TAX'] = m.group(4)
+                    row['TOTAL BASIC PO VALUE WITHOUT TAX'] = m.group(5).replace(',', '')
+                    if row['ARTICLE DESCRIPTION']:
+                        row['ARTICLE DESCRIPTION'] = re.sub(r'\[HSN.*?\]', '', row['ARTICLE DESCRIPTION']).strip()
+                        row['ARTICLE DESCRIPTION'] = re.sub(r'\s+', ' ', row['ARTICLE DESCRIPTION'])
+                    rows.append(row)
             else:
-                # Alternative extraction using simpler patterns
-                # Extract article description - more flexible pattern
+                # Fallback: single-article extraction with simpler patterns
                 desc_match = re.search(r'(\d{13})\s+([\w\s\(\)\-/]+?)(?:\s*\[HSN|\s+EA\s+|\s+PC\s+|\s+KG\s+)', full_text)
                 if desc_match:
                     data['ARTICLE DESCRIPTION'] = desc_match.group(2).strip()
-                
-                # Extract quantity - look for pattern after description
                 qty_match = re.search(r'(?:EA|PC|KG|LT|MT)\s+(\d+)\s+\d+\s+([\d.]+)', full_text)
                 if qty_match:
                     data['TOTAL PCS'] = qty_match.group(1)
                     data['BASIC PRICE WITHOUT TAX'] = qty_match.group(2)
-                
-                # Extract total value
                 total_match = re.search(r'Total\s+(\d+)\s+([\d,]+\.?\d*)', full_text)
                 if total_match:
                     if not data['TOTAL PCS']:
                         data['TOTAL PCS'] = total_match.group(1)
                     data['TOTAL BASIC PO VALUE WITHOUT TAX'] = total_match.group(2).replace(',', '')
-            
-            # Clean up article description - remove HSN code info and combine multi-line descriptions
-            if data['ARTICLE DESCRIPTION']:
-                # Check if there's a continuation of the description (e.g., PANIPURI(200G))
-                desc_continuation = re.search(
-                    re.escape(data['ARTICLE DESCRIPTION']) + r'.*?(?:EA|PC|KG)\s+\d+.*?\n([A-Z\(\)\d]+)\s*\[HSN',
-                    full_text, re.DOTALL
-                )
-                if desc_continuation:
-                    data['ARTICLE DESCRIPTION'] = data['ARTICLE DESCRIPTION'] + ' ' + desc_continuation.group(1).strip()
+                if data['ARTICLE DESCRIPTION']:
+                    data['ARTICLE DESCRIPTION'] = re.sub(r'\[HSN.*?\]', '', data['ARTICLE DESCRIPTION']).strip()
+                    data['ARTICLE DESCRIPTION'] = re.sub(r'\s+', ' ', data['ARTICLE DESCRIPTION'])
                 
-                data['ARTICLE DESCRIPTION'] = re.sub(r'\[HSN.*?\]', '', data['ARTICLE DESCRIPTION']).strip()
-                data['ARTICLE DESCRIPTION'] = re.sub(r'\s+', ' ', data['ARTICLE DESCRIPTION'])
+                if 'shareat' in data.get('ARTICLE DESCRIPTION', '').lower():
+                    rows.append(data)
             
     except Exception as e:
         print(f"Error processing {pdf_path}: {str(e)}")
+        rows = [empty_row()]
     
-    return data
+    return rows
 
 
 def process_po_folder(input_folder, output_file=None):
@@ -237,12 +234,12 @@ def process_po_folder(input_folder, output_file=None):
     
     print(f"Found {len(pdf_files)} PDF file(s) to process...")
     
-    # Extract data from all PDFs
+    # Extract data from all PDFs (each PDF can yield multiple rows, one per article)
     all_data = []
     for pdf_path in pdf_files:
         print(f"Processing: {os.path.basename(pdf_path)}")
-        data = extract_po_data(pdf_path)
-        all_data.append(data)
+        rows = extract_po_data(pdf_path)
+        all_data.extend(rows)
     
     # Create DataFrame
     df = pd.DataFrame(all_data)
