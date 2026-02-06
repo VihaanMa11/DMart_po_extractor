@@ -181,11 +181,23 @@ function App() {
       setProgress(100)
       setProgressText('Processing complete!')
 
-      const data = await response.json()
-
       if (!response.ok) {
-        throw new Error(data.error || 'Upload failed')
+        let errorMessage = 'Upload failed';
+        try {
+          const errorData = await response.json();
+          errorMessage = errorData.error || errorMessage;
+        } catch (e) {
+          // If response is not JSON (e.g. 413 Request Entity Too Large HTML/Text)
+          if (response.status === 413) {
+            errorMessage = 'Files are too large to upload. Please try fewer files at a time.';
+          } else {
+            errorMessage = `Server Error (${response.status})`;
+          }
+        }
+        throw new Error(errorMessage);
       }
+
+      const data = await response.json()
 
       setTimeout(() => {
         setResults(data)
