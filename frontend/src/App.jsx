@@ -68,7 +68,7 @@ function App() {
   const [user, setUser] = useState(null)
   const [token, setToken] = useState(null)
   const [showAdmin, setShowAdmin] = useState(false)
-  
+
   const [files, setFiles] = useState([])
   const [isProcessing, setIsProcessing] = useState(false)
   const [progress, setProgress] = useState(0)
@@ -79,11 +79,11 @@ function App() {
   useEffect(() => {
     const savedToken = localStorage.getItem('po_token')
     const savedUser = localStorage.getItem('po_user')
-    
+
     if (savedToken && savedUser) {
       setToken(savedToken)
       setUser(JSON.parse(savedUser))
-      
+
       fetch(`${API_BASE}/api/auth/me`, {
         headers: { 'X-User-Token': savedToken }
       }).then(res => {
@@ -112,7 +112,7 @@ function App() {
         // Ignore
       }
     }
-    
+
     setToken(null)
     setUser(null)
     setShowAdmin(false)
@@ -126,7 +126,7 @@ function App() {
     const pdfFiles = Array.from(newFiles).filter(
       f => f.type === 'application/pdf' || f.name.toLowerCase().endsWith('.pdf')
     )
-    
+
     setFiles(prev => {
       const existing = new Set(prev.map(f => `${f.name}-${f.size}`))
       const unique = pdfFiles.filter(f => !existing.has(`${f.name}-${f.size}`))
@@ -151,53 +151,71 @@ function App() {
 
     setIsProcessing(true)
     setProgress(0)
-    setProgressText('Uploading files...')
+    setProgressText('Preparing upload...')
     setResults(null)
     setError(null)
 
-    const formData = new FormData()
-    files.forEach(file => formData.append('files[]', file))
-
-    const progressInterval = setInterval(() => {
-      setProgress(prev => {
-        const next = prev + Math.random() * 15
-        return next > 90 ? 90 : next
-      })
-      setProgressText(prev => {
-        if (prev === 'Uploading files...') return 'Processing PDFs...'
-        if (prev === 'Processing PDFs...') return 'Extracting data...'
-        return 'Generating Excel...'
-      })
-    }, 400)
+    // Generate a simple session ID
+    const sessionId = Date.now().toString(36) + Math.random().toString(36).substring(2)
+    const BATCH_SIZE = 5
+    const totalBatches = Math.ceil(files.length / BATCH_SIZE)
 
     try {
-      const response = await fetch(`${API_BASE}/upload`, {
-        method: 'POST',
-        headers: { 'X-User-Token': token },
-        body: formData
-      })
+      // 1. Upload in batches
+      for (let i = 0; i < files.length; i += BATCH_SIZE) {
+        const batchFiles = files.slice(i, i + BATCH_SIZE)
+        const currentBatch = Math.floor(i / BATCH_SIZE) + 1
 
-      clearInterval(progressInterval)
-      setProgress(100)
-      setProgressText('Processing complete!')
+        setProgressText(`Uploading batch ${currentBatch} of ${totalBatches}...`)
 
-      if (!response.ok) {
-        let errorMessage = 'Upload failed';
-        try {
-          const errorData = await response.json();
-          errorMessage = errorData.error || errorMessage;
-        } catch (e) {
-          // If response is not JSON (e.g. 413 Request Entity Too Large HTML/Text)
-          if (response.status === 413) {
-            errorMessage = 'Files are too large to upload. Please try fewer files at a time.';
-          } else {
-            errorMessage = `Server Error (${response.status})`;
+        const formData = new FormData()
+        formData.append('session_id', sessionId)
+        batchFiles.forEach(file => formData.append('files[]', file))
+
+        const uploadRes = await fetch(`${API_BASE}/upload`, {
+          method: 'POST',
+          headers: { 'X-User-Token': token },
+          body: formData
+        })
+
+        if (!uploadRes.ok) {
+          let errorMessage = 'Upload failed';
+          try {
+            const errorData = await uploadRes.json();
+            errorMessage = errorData.error || errorMessage;
+          } catch {
+            if (uploadRes.status === 413) errorMessage = 'Batch too large (Server Limit).';
           }
+          throw new Error(errorMessage)
         }
-        throw new Error(errorMessage);
+
+        // Update progress (0-60%)
+        const progressPercent = Math.round((currentBatch / totalBatches) * 60)
+        setProgress(progressPercent)
       }
 
-      const data = await response.json()
+      // 2. Process all files
+      setProgressText('Extracting data and generating Excel...')
+      setProgress(75)
+
+      const processRes = await fetch(`${API_BASE}/api/process`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-User-Token': token
+        },
+        body: JSON.stringify({ session_id: sessionId })
+      })
+
+      if (!processRes.ok) {
+        const errorData = await processRes.json().catch(() => ({}))
+        throw new Error(errorData.error || 'Processing failed')
+      }
+
+      const data = await processRes.json()
+
+      setProgress(100)
+      setProgressText('Complete!')
 
       setTimeout(() => {
         setResults(data)
@@ -205,29 +223,30 @@ function App() {
       }, 600)
 
     } catch (err) {
-      clearInterval(progressInterval)
       setError(err.message)
       setIsProcessing(false)
       setProgress(0)
     }
   }
 
+
+
   const handleDownload = () => {
     if (results?.excel_file) {
       fetch(`${API_BASE}/download/${encodeURIComponent(results.excel_file)}`, {
         headers: { 'X-User-Token': token }
       })
-      .then(res => res.blob())
-      .then(blob => {
-        const url = window.URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = results.excel_file.split('_').slice(1).join('_')
-        document.body.appendChild(a)
-        a.click()
-        window.URL.revokeObjectURL(url)
-        document.body.removeChild(a)
-      })
+        .then(res => res.blob())
+        .then(blob => {
+          const url = window.URL.createObjectURL(blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = results.excel_file.split('_').slice(1).join('_')
+          document.body.appendChild(a)
+          a.click()
+          window.URL.revokeObjectURL(url)
+          document.body.removeChild(a)
+        })
     }
   }
 
@@ -278,7 +297,7 @@ function App() {
         <div className="info-banner">
           <InfoIcon />
           <span>
-            Upload a Purchase Order PDF to automatically extract structured data. 
+            Upload a Purchase Order PDF to automatically extract structured data.
             The extracted data can be exported to Excel (CSV) format.
           </span>
         </div>
@@ -287,12 +306,12 @@ function App() {
           {!isProcessing && !results && (
             <>
               <FileUpload onFilesSelected={handleFilesSelected} />
-              
+
               {files.length > 0 && (
                 <>
-                  <FileList 
-                    files={files} 
-                    onRemove={handleRemoveFile} 
+                  <FileList
+                    files={files}
+                    onRemove={handleRemoveFile}
                   />
                   <div className="actions">
                     <button className="btn btn-primary" onClick={handleProcess}>
@@ -321,8 +340,8 @@ function App() {
           )}
 
           {results && (
-            <Results 
-              results={results} 
+            <Results
+              results={results}
               onDownload={handleDownload}
               onReset={handleReset}
             />

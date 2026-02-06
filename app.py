@@ -391,34 +391,28 @@ def upload_files():
     
     user = request.current_user
     
-    if 'files[]' not in request.files:
-        return jsonify({'error': 'No files provided'}), 400
+    # Check for session_id in form data to support batching
+    session_id = request.form.get('session_id')
+    if not session_id:
+        session_id = str(uuid.uuid4())
     
-    files = request.files.getlist('files[]')
-    
-    if not files or all(f.filename == '' for f in files):
-        return jsonify({'error': 'No files selected'}), 400
-    
-    session_id = str(uuid.uuid4())
     session_folder = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
     os.makedirs(session_folder, exist_ok=True)
     
-    results = {
-        'session_id': session_id,
-        'processed': [],
-        'errors': [],
-        'total_files': 0,
-        'successful': 0
-    }
+    files = request.files.getlist('files[]')
     
-    valid_files = []
+    # Valid files tracking
+    saved_count = 0
+    errors = []
+    
+    if not files or all(f.filename == '' for f in files):
+        # Even if no files in this batch (weird), return session_id
+        return jsonify({'session_id': session_id, 'saved': 0, 'errors': []})
     
     for file in files:
         if file and file.filename:
-            results['total_files'] += 1
-            
             if not allowed_file(file.filename):
-                results['errors'].append({
+                errors.append({
                     'filename': file.filename,
                     'error': 'Invalid file format. Only PDF files are allowed.'
                 })
@@ -429,44 +423,89 @@ def upload_files():
             
             try:
                 file.save(filepath)
-                valid_files.append((filename, filepath))
+                saved_count += 1
             except Exception as e:
-                results['errors'].append({
+                errors.append({
                     'filename': file.filename,
                     'error': f'Failed to save file: {str(e)}'
                 })
     
-    all_data = []
+    # Log upload activity (partial)
+    log_activity(user['username'], 'upload_batch', {
+        'file_count': saved_count,
+        'session_id': session_id
+    })
     
-    for filename, filepath in valid_files:
-        try:
-            rows = extract_po_data(filepath)
-            first = rows[0] if rows else {}
-            for row in rows:
-                row['SOURCE_FILE'] = filename
-                all_data.append(row)
-            
-            article_summary = f"{len(rows)} article(s)" if len(rows) != 1 else (first.get('ARTICLE DESCRIPTION') or 'N/A')
-            results['processed'].append({
-                'filename': filename,
-                'status': 'success',
-                'po_no': first.get('PO NO', 'N/A'),
-                'vendor': first.get('VENDOR NAME', 'N/A'),
-                'article': article_summary,
-                'total_pcs': first.get('TOTAL PCS', 'N/A') if len(rows) == 1 else f"{len(rows)} lines",
-                'basic_price': first.get('BASIC PRICE WITHOUT TAX', 'N/A'),
-                'total_value': first.get('TOTAL BASIC PO VALUE WITHOUT TAX', 'N/A')
-            })
-            results['successful'] += 1
-            
-        except Exception as e:
-            results['errors'].append({
-                'filename': filename,
-                'error': f'Extraction failed: {str(e)}'
-            })
+    return jsonify({
+        'session_id': session_id,
+        'saved': saved_count,
+        'errors': errors
+    })
+
+
+@app.route('/api/process', methods=['POST', 'OPTIONS'])
+@require_auth
+def process_session():
+    if request.method == 'OPTIONS':
+        return '', 204
+        
+    data = request.get_json()
+    session_id = data.get('session_id')
     
-    if all_data:
-        try:
+    if not session_id:
+        return jsonify({'error': 'Session ID required'}), 400
+        
+    session_folder = os.path.join(app.config['UPLOAD_FOLDER'], session_id)
+    if not os.path.exists(session_folder):
+        return jsonify({'error': 'Session not found or expired'}), 404
+        
+    results = {
+        'session_id': session_id,
+        'processed': [],
+        'errors': [],
+        'total_files': 0,
+        'successful': 0,
+        'download_ready': False
+    }
+    
+    try:
+        # 1. Process all files in the folder
+        # We need to list valid PDFs in the folder
+        pdf_files = [f for f in os.listdir(session_folder) if f.lower().endswith('.pdf')]
+        results['total_files'] = len(pdf_files)
+        
+        all_data = []
+        
+        for filename in pdf_files:
+            filepath = os.path.join(session_folder, filename)
+            try:
+                rows = extract_po_data(filepath)
+                first = rows[0] if rows else {}
+                for row in rows:
+                    row['SOURCE_FILE'] = filename
+                    all_data.append(row)
+                
+                article_summary = f"{len(rows)} article(s)" if len(rows) != 1 else (first.get('ARTICLE DESCRIPTION') or 'N/A')
+                results['processed'].append({
+                    'filename': filename,
+                    'status': 'success',
+                    'po_no': first.get('PO NO', 'N/A'),
+                    'vendor': first.get('VENDOR NAME', 'N/A'),
+                    'article': article_summary,
+                    'total_pcs': first.get('TOTAL PCS', 'N/A') if len(rows) == 1 else f"{len(rows)} lines",
+                    'basic_price': first.get('BASIC PRICE WITHOUT TAX', 'N/A'),
+                    'total_value': first.get('TOTAL BASIC PO VALUE WITHOUT TAX', 'N/A')
+                })
+                results['successful'] += 1
+                
+            except Exception as e:
+                results['errors'].append({
+                    'filename': filename,
+                    'error': f'Extraction failed: {str(e)}'
+                })
+
+        # 2. Generate Excel if data exists
+        if all_data:
             df = pd.DataFrame(all_data)
             
             cols = df.columns.tolist()
@@ -485,28 +524,16 @@ def upload_files():
             results['excel_file'] = f'{session_id}_{output_filename}'
             results['download_ready'] = True
             
-        except Exception as e:
-            results['errors'].append({
-                'filename': 'Excel Generation',
-                'error': f'Failed to generate Excel: {str(e)}'
-            })
-            results['download_ready'] = False
-    else:
-        results['download_ready'] = False
-    
-    # Log upload activity
-    log_activity(user['username'], 'upload', {
-        'file_count': results['total_files'],
-        'successful': results['successful'],
-        'session_id': session_id
-    })
-    
-    try:
-        shutil.rmtree(session_folder)
-    except:
-        pass
-    
-    return jsonify(results)
+        # 3. Cleanup
+        try:
+            shutil.rmtree(session_folder)
+        except:
+            pass
+            
+        return jsonify(results)
+
+    except Exception as e:
+        return jsonify({'error': f'Processing failed: {str(e)}'}), 500
 
 @app.route('/download/<filename>')
 @require_auth

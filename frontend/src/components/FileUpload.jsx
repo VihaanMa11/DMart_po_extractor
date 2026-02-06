@@ -52,7 +52,7 @@ function FileUpload({ onFilesSelected }) {
   }
 
   return (
-    <div 
+    <div
       className={`upload-zone ${isDragging ? 'dragover' : ''}`}
       onDragOver={handleDragOver}
       onDragLeave={handleDragLeave}
@@ -63,16 +63,16 @@ function FileUpload({ onFilesSelected }) {
         <UploadIcon />
       </div>
       <h3>Drag & Drop PDF Files Here</h3>
-      <p>Supports multiple PDF files up to 50MB total</p>
-      <input 
-        type="file" 
+      <p>Supports multiple PDF files (e.g., 30+) up to 500MB total</p>
+      <input
+        type="file"
         id="file-input"
         className="file-input"
-        multiple 
+        multiple
         accept=".pdf"
         onChange={handleFileChange}
       />
-      <button 
+      <button
         className="btn btn-primary"
         onClick={(e) => {
           e.stopPropagation()
